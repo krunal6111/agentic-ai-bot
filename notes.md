@@ -2,7 +2,7 @@
 
 ## TODO
 
-(nothing yet)
+exercise 3 testing
 
 ## Ideas
 
@@ -10,4 +10,4 @@ launch the podcast
 
 ## Log
 
-- (nothing yet)
+day 1 - set up the repo

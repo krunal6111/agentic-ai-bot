@@ -12,9 +12,10 @@ from typing import Annotated
 
 from typing_extensions import TypedDict
 from dotenv import load_dotenv
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_groq import ChatGroq
+from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
@@ -96,7 +97,9 @@ graph.add_edge(START, "agent")
 graph.add_conditional_edges("agent", route_after_agent)
 graph.add_edge("tools", "agent")
 
-app = graph.compile()
+
+def build_app(checkpointer):
+    return graph.compile(checkpointer=checkpointer)
 
 
 SYSTEM_PROMPT = (
@@ -112,29 +115,44 @@ SYSTEM_PROMPT = (
 )
 
 
-def main():
+def main(checkpointer):
     print("Section Updater. Sections: TODO, Ideas, Log. Type 'quit' to exit.\n")
 
-    history: list[BaseMessage] = [SystemMessage(SYSTEM_PROMPT)]
+    app = build_app(checkpointer)
+
+    thread_id = input("Thread id (reuse the same id to continue a conversation): ").strip() or "default"
+    config = {"configurable": {"thread_id": thread_id}}
+
+    existing = app.get_state(config)
+    is_new_thread = not existing.values.get("messages")
+    if is_new_thread:
+        print(f"[starting new thread '{thread_id}']\n")
+    else:
+        print(f"[resuming thread '{thread_id}', {len(existing.values['messages'])} messages already stored]\n")
 
     while True:
         user_input = input("You: ").strip()
         if user_input.lower() in {"quit", "exit"}:
             break
 
-        history.append(HumanMessage(user_input))
+        new_messages = [HumanMessage(user_input)]
+        if is_new_thread:
+            new_messages = [SystemMessage(SYSTEM_PROMPT)] + new_messages
+            is_new_thread = False
 
-        result = app.invoke({"messages": history})
-        history = result["messages"]  # carry this turn's messages into the next one
+        # Only the new message(s) go in -- the checkpointer loads this thread's
+        # prior history from disk and merges it in via the add_messages reducer.
+        result = app.invoke({"messages": new_messages}, config=config)
 
-        print("\n--- message trace ---")
+        print("\n--- full conversation state for this thread ---")
         for m in result["messages"]:
             tool_calls = getattr(m, "tool_calls", None)
             print(f"[{m.type}] {m.content!r}" + (f" tool_calls={tool_calls}" if tool_calls else ""))
-        print("--- end trace ---\n")
+        print("--- end state ---\n")
 
         print(f"Agent: {result['messages'][-1].content}\n")
 
 
 if __name__ == "__main__":
-    main()
+    with SqliteSaver.from_conn_string("checkpoints.sqlite") as checkpointer:
+        main(checkpointer)
