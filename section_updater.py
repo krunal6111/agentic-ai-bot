@@ -47,7 +47,26 @@ def update_section(section_name: str, new_content: str) -> str:
     return f"Updated section '{section_name}'."
 
 
-TOOLS = [update_section]
+@tool
+def read_section(section_name: str) -> str:
+    """Return the current contents of a markdown '## section_name' section in notes.md."""
+    with open(NOTES_PATH, "r", encoding="utf-8") as f:
+        text = f.read()
+
+    header = f"## {section_name}"
+    start = text.find(header)
+    if start == -1:
+        return f"Section '{section_name}' not found in notes.md"
+
+    body_start = start + len(header)
+    next_header = text.find("\n## ", body_start)
+    body_end = next_header if next_header != -1 else len(text)
+
+    content = text[body_start:body_end].strip()
+    return content if content else "(empty)"
+
+
+TOOLS = [update_section, read_section]
 
 
 class State(TypedDict):
@@ -82,9 +101,13 @@ app = graph.compile()
 
 SYSTEM_PROMPT = (
     "You edit a markdown notes file made of ## sections: TODO, Ideas, Log. "
-    "When the user asks to add, change, or replace something in a section, "
-    "call update_section with the FULL new content for that section "
-    "(if the user is adding to existing content, include the existing items too). "
+    "update_section always REPLACES the entire section's content, it cannot add or "
+    "remove a single line on its own. So whenever the user asks to add an item, remove "
+    "an item, or otherwise partially change a section, you MUST call read_section first "
+    "to see what's currently there, then call update_section with the FULL new content "
+    "(existing items plus your change, minus anything removed). "
+    "Only skip read_section if the user already gave you the exact full content the "
+    "section should end up with. Never guess or invent section content. "
     "Then confirm briefly what you changed."
 )
 
